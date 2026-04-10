@@ -1,0 +1,8 @@
+@using Microsoft.AspNetCore.Components.Routing
+@using PortableObsidian.Client
+<Router AppAssembly="typeof(PortableObsidian.Client.Routes.Routes).Assembly">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(PortableObsidian.Client.Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

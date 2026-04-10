@@ -1,0 +1,28 @@
+## .NET Core
+bin/
+obj/
+publish/
+
+## Configuration & Logs
+config.json
+*.log
+
+## Tunnel Engine (자동 다운로드됨)
+cloudflared
+cloudflared.exe
+
+## Build Artifacts
+PortableBuild/
+
+## OS specific
+.DS_Store
+Thumbs.db
+
+## User-specific files
+*.user
+*.userosscache
+*.sln.docuser
+
+## Visual Studio files
+.vs/
+[Tt]est[Rr]esult*/

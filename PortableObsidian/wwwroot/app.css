@@ -1,0 +1,213 @@
+/* Obsidian Theme UI */
+html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: 'Inter', sans-serif;
+    background-color: #1e1e1e;
+    color: #dcddde;
+    overflow: hidden;
+}
+
+#app, .page, main { height: 100%; width: 100%; }
+
+.obsidian-layout {
+    display: flex;
+    height: 100%;
+}
+
+/* Sidebar */
+.sidebar {
+    background-color: #2f3136;
+    border-right: 1px solid #202225;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    min-width: 150px;
+    max-width: 600px;
+    flex-shrink: 0;
+    transition: width 0.3s ease, min-width 0.3s ease, border-right 0.3s ease; /* 너비 애니메이션 */
+}
+
+.sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    border-right: none;
+    overflow: hidden;
+}
+
+/* Sidebar Toggle Button */
+.toggle-sidebar-btn {
+    background: transparent;
+    border: none;
+    color: #8e9297;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 5px 10px;
+    margin-right: 10px;
+    border-radius: 4px;
+    flex-shrink: 0; /* 버튼 크기 고정 */
+}
+
+.toggle-sidebar-btn:hover {
+    background-color: #40444b;
+    color: #fff;
+}
+
+/* Resizer Handle */
+.sidebar-resizer.collapsed {
+    display: none;
+}
+
+.sidebar-resizer {
+    width: 4px;
+    cursor: col-resize;
+    background-color: transparent;
+    transition: background-color 0.2s;
+    z-index: 10;
+}
+
+.sidebar-resizer:hover, .sidebar-resizer.active {
+    background-color: #5865f2;
+}
+
+.sidebar-header {
+    padding: 1rem;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: #8e9297;
+    font-weight: bold;
+    border-bottom: 1px solid #202225;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-box {
+    padding: 0.8rem;
+    border-bottom: 1px solid #202225;
+}
+
+.search-input {
+    width: 100%;
+    box-sizing: border-box; /* 패딩을 너비에 포함시켜 잘림 방지 */
+    background-color: #202225;
+    border: 1px solid #202225;
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: #dcddde;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.search-input:focus {
+    border-color: #5865f2;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 5px;
+}
+
+.action-btn {
+    background: transparent;
+    border: none;
+    color: #8e9297;
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 2px 5px;
+    border-radius: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.action-btn:hover {
+    background: #393c43;
+    color: #fff;
+}
+
+.tree-item {
+    padding: 0.4rem 1rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tree-item:hover { background-color: #393c43; }
+.tree-item.active { background-color: #40444b; color: #fff; }
+.tree-dir { font-weight: bold; color: #b9bbbe; }
+
+/* Editor & Preview */
+.editor-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #36393f;
+}
+
+.editor-header {
+    padding: 0.5rem 1.5rem;
+    background-color: #2f3136;
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #202225;
+}
+
+.mode-toggles {
+    display: flex;
+    gap: 10px;
+}
+
+.mode-btn {
+    background: #40444b;
+    border: none;
+    color: #b9bbbe;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.mode-btn.active {
+    background: #5865f2;
+    color: white;
+}
+
+.editor-textarea {
+    flex-grow: 1;
+    border: none;
+    background: transparent;
+    color: #dcddde;
+    padding: 2rem;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 1rem;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+}
+
+/* Markdown Preview Styling */
+.markdown-preview {
+    flex-grow: 1;
+    padding: 2rem 4rem;
+    overflow-y: auto;
+    line-height: 1.6;
+    color: #dcddde;
+}
+
+.markdown-preview h1 { border-bottom: 1px solid #4f545c; padding-bottom: 0.3em; margin-top: 1.5em; }
+.markdown-preview h2 { border-bottom: 1px solid #4f545c; padding-bottom: 0.3em; }
+.markdown-preview code { background-color: #2f3136; padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
+.markdown-preview pre { background-color: #2f3136; padding: 1em; border-radius: 5px; overflow-x: auto; }
+.markdown-preview blockquote { border-left: 4px solid #4f545c; padding-left: 1em; color: #8e9297; margin: 1em 0; }
+.markdown-preview img { max-width: 100%; }
+.markdown-preview a { color: #00b0f4; text-decoration: none; }
+.markdown-preview a:hover { text-decoration: underline; }
+.markdown-preview table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+.markdown-preview th, .markdown-preview td { border: 1px solid #4f545c; padding: 0.5em; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-thumb { background: #202225; border-radius: 4px; }

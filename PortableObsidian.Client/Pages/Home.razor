@@ -1,0 +1,353 @@
+@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using PortableObsidian.Client.Models
+@using Markdig
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+
+<div class="obsidian-layout" 
+     @onmousemove="OnMouseMove" 
+     @onmouseup="OnMouseUp"
+     style="user-select: @(_isResizing ? "none" : "auto")">
+    
+    <!-- Sidebar: File Explorer -->
+    <div class="sidebar @(_isSidebarCollapsed ? "collapsed" : "")" style="width: @(_sidebarWidth)px">
+        <div class="sidebar-header">
+            <span>Vault</span>
+            <div class="action-buttons">
+                <button class="action-btn" title="새 파일" @onclick="PromptCreateFile" disabled="@_isReadOnly">📄+</button>
+                <button class="action-btn" title="새 폴더" @onclick="PromptCreateDirectory" disabled="@_isReadOnly">📂+</button>
+            </div>
+            @if (_isReadOnly)
+            {
+                <span style="font-size:0.7rem; color:#ff4d4f; margin-left:5px;">(RO)</span>
+            }
+        </div>
+
+        <div class="search-box">
+            <input class="search-input" 
+                   placeholder="노트 검색..." 
+                   @bind="_searchQuery" 
+                   @bind:event="oninput" 
+                   @onkeyup="HandleSearch" />
+        </div>
+
+        <div class="tree-root" style="overflow-y: auto; flex-grow: 1;">
+            @if (!string.IsNullOrWhiteSpace(_searchQuery))
+            {
+                <div class="sidebar-header" style="border:none; padding-bottom:5px; font-size:0.7rem;">Search Results</div>
+                @if (_searchResults.Count == 0)
+                {
+                    <div style="padding:1rem; font-size:0.8rem; color:#4f545c;">결과 없음</div>
+                }
+                @foreach (var result in _searchResults)
+                {
+                    <div class="tree-item @(result == _selectedFile ? "active" : "")" 
+                         style="padding-left: 16px"
+                         @onclick="() => SelectFile(result)">
+                        📄 @result.Name
+                    </div>
+                }
+            }
+            else if (_rootItem != null)
+            {
+                @foreach (var child in _rootItem.Children)
+                {
+                    @RenderTreeItem(child, 0)
+                }
+            }
+        </div>
+    </div>
+
+    <!-- Resizer Handle -->
+    <div class="sidebar-resizer @(_isSidebarCollapsed ? "collapsed" : "") @(_isResizing ? "active" : "")" 
+         @onmousedown="OnMouseDown">
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="editor-container">
+        <div class="editor-header">
+            <div style="display:flex; align-items:center;">
+                <!-- 👈 사이드바 토글 버튼 (확실히 추가) -->
+                <button class="toggle-sidebar-btn" @onclick="ToggleSidebar" title="사이드바 토글">☰</button>
+                
+                @if (_selectedFile != null)
+                {
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span class="file-name">📄 @_selectedFile.Name</span>
+                        <button class="action-btn" style="font-size:0.8rem;" @onclick="PromptRenameFile" disabled="@_isReadOnly" title="이름 변경">✏️</button>
+                        <button class="action-btn" style="font-size:0.8rem;" @onclick="PromptMoveFile" disabled="@_isReadOnly" title="폴더 이동">📦</button>
+                    </div>
+                }
+            </div>
+            
+            @if (_selectedFile != null)
+            {
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <div class="mode-toggles">
+                        <button class="mode-btn @(_editMode == "edit" ? "active" : "")" @onclick='() => _editMode = "edit"'>Edit</button>
+                        <button class="mode-btn @(_editMode == "preview" ? "active" : "")" @onclick='() => _editMode = "preview"'>Preview</button>
+                    </div>
+
+                    <span class="sync-status">
+                        @if (_isReadOnly)
+                        {
+                            <span style="color:#ff4d4f;">🔒 Read Only</span>
+                        }
+                        else
+                        {
+                            <span>@(_isConnected ? "🟢 Connected" : "🔴 Disconnected")</span>
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+
+        @if (_selectedFile != null)
+        {
+            @if (_editMode == "edit")
+            {
+                <textarea class="editor-textarea" 
+                          @bind="CurrentFileContent" 
+                          @bind:event="oninput"
+                          disabled="@_isReadOnly"
+                          placeholder="@(_isReadOnly ? "읽기 전용 모드에서는 편집할 수 없습니다." : "내용을 입력하세요...")"></textarea>
+            }
+            else
+            {
+                <div class="markdown-preview">
+                    @((MarkupString)_markdownHtml)
+                </div>
+            }
+        }
+        else
+        {
+            <div style="display:flex; justify-content:center; align-items:center; height:100%; color:#72767d;">
+                파일을 선택하여 편집을 시작하세요
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private HubConnection? _hubConnection;
+    private VaultItem? _rootItem;
+    private VaultItem? _selectedFile;
+    private string _textContent = "";
+    private string _markdownHtml = "";
+    private string _editMode = "edit";
+    private bool _isReadOnly = false;
+    private bool _isConnected => _hubConnection?.State == HubConnectionState.Connected;
+
+    private double _sidebarWidth = 260;
+    private bool _isResizing = false;
+    private bool _isSidebarCollapsed = false;
+
+    private string _searchQuery = "";
+    private List<VaultItem> _searchResults = new();
+    private HashSet<string> _expandedPaths = new();
+
+    private readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .UseSoftlineBreakAsHardlineBreak()
+        .Build();
+
+    public string CurrentFileContent
+    {
+        get => _textContent;
+        set
+        {
+            if (!_isReadOnly && _textContent != value)
+            {
+                _textContent = value;
+                UpdatePreview();
+                _ = SaveCurrentFile();
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _hubConnection = new HubConnectionBuilder()
+            .WithUrl(Navigation.ToAbsoluteUri("/vaulthub"))
+            .WithAutomaticReconnect()
+            .Build();
+
+        _hubConnection.On<string, string>("FileUpdated", (path, content) =>
+        {
+            if (_selectedFile?.RelativePath == path && _textContent != content)
+            {
+                _textContent = content;
+                UpdatePreview();
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        _hubConnection.On<bool>("ModeChanged", (readOnly) =>
+        {
+            _isReadOnly = readOnly;
+            InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On("VaultPathChanged", async () =>
+        {
+            _selectedFile = null;
+            _textContent = "";
+            _rootItem = await _hubConnection.InvokeAsync<VaultItem>("GetVaultTree");
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On("VaultChanged", async () =>
+        {
+            _rootItem = await _hubConnection.InvokeAsync<VaultItem>("GetVaultTree");
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _hubConnection.On<string, string, string>("FileRenamed", (oldPath, newPath, newName) =>
+        {
+            if (_selectedFile?.RelativePath == oldPath)
+            {
+                _selectedFile.RelativePath = newPath;
+                _selectedFile.Name = newName;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        await _hubConnection.StartAsync();
+        _isReadOnly = await _hubConnection.InvokeAsync<bool>("GetIsReadOnly");
+        _rootItem = await _hubConnection.InvokeAsync<VaultItem>("GetVaultTree");
+    }
+
+    private void ToggleSidebar() => _isSidebarCollapsed = !_isSidebarCollapsed;
+    
+    private void ToggleFolder(string path)
+    {
+        if (_expandedPaths.Contains(path)) _expandedPaths.Remove(path);
+        else _expandedPaths.Add(path);
+    }
+
+    private async Task HandleSearch()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery)) _searchResults.Clear();
+        else _searchResults = await _hubConnection!.InvokeAsync<List<VaultItem>>("SearchVault", _searchQuery);
+        StateHasChanged();
+    }
+
+    private void OnMouseDown(MouseEventArgs e) => _isResizing = true;
+    private void OnMouseUp(MouseEventArgs e) => _isResizing = false;
+    private void OnMouseMove(MouseEventArgs e)
+    {
+        if (_isResizing && !_isSidebarCollapsed)
+        {
+            if (e.ClientX >= 150 && e.ClientX <= 600) _sidebarWidth = e.ClientX;
+        }
+    }
+
+    private async Task SelectFile(VaultItem item)
+    {
+        if (item.IsDirectory)
+        {
+            ToggleFolder(item.RelativePath);
+            return;
+        }
+        _selectedFile = item;
+        _textContent = await _hubConnection!.InvokeAsync<string>("ReadFile", item.RelativePath);
+        UpdatePreview();
+        StateHasChanged();
+    }
+
+    private async Task UpdatePreview()
+    {
+        var rawContent = _textContent;
+        var regex = new System.Text.RegularExpressions.Regex(@"!\[\[(.*?)\]\]");
+        var matches = regex.Matches(rawContent);
+
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            var fileName = match.Groups[1].Value;
+            if (fileName.Contains("|")) fileName = fileName.Split('|')[0];
+
+            var base64Data = await _hubConnection!.InvokeAsync<string>("GetImageBase64", fileName);
+            if (!string.IsNullOrEmpty(base64Data))
+            {
+                var imgTag = $"<img src='{base64Data}' style='max-width:100%; border-radius:8px; display:block; margin:1rem 0;' />";
+                rawContent = rawContent.Replace(match.Value, imgTag);
+            }
+        }
+        _markdownHtml = Markdown.ToHtml(rawContent, _pipeline);
+    }
+
+    private async Task SaveCurrentFile()
+    {
+        if (!_isReadOnly && _selectedFile != null && _hubConnection != null)
+        {
+            await _hubConnection.SendAsync("SaveFile", _selectedFile.RelativePath, _textContent);
+        }
+    }
+
+    private async Task PromptCreateFile()
+    {
+        var name = await JS.InvokeAsync<string>("prompt", "생성할 마크다운 파일명을 입력하세요");
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            if (!name.EndsWith(".md")) name += ".md";
+            await _hubConnection!.SendAsync("CreateFile", name);
+        }
+    }
+
+    private async Task PromptCreateDirectory()
+    {
+        var name = await JS.InvokeAsync<string>("prompt", "생성할 폴더명을 입력하세요");
+        if (!string.IsNullOrWhiteSpace(name)) await _hubConnection!.SendAsync("CreateDirectory", name);
+    }
+
+    private async Task PromptRenameFile()
+    {
+        if (_selectedFile == null) return;
+        var name = await JS.InvokeAsync<string>("prompt", "새 파일명을 입력하세요", _selectedFile.Name);
+        if (!string.IsNullOrWhiteSpace(name) && name != _selectedFile.Name)
+        {
+            await _hubConnection!.SendAsync("RenameFile", _selectedFile.RelativePath, name);
+        }
+    }
+
+    private async Task PromptMoveFile()
+    {
+        if (_selectedFile == null) return;
+        var targetDir = await JS.InvokeAsync<string>("prompt", "이동할 대상 폴더 경로를 입력하세요 (루트는 비워두기)");
+        if (targetDir != null) await _hubConnection!.SendAsync("MoveFile", _selectedFile.RelativePath, targetDir);
+    }
+
+    private RenderFragment RenderTreeItem(VaultItem item, int level) => __builder =>
+    {
+        bool isExpanded = _expandedPaths.Contains(item.RelativePath);
+        <div class="tree-item @(item.IsDirectory ? "tree-dir" : "") @(item == _selectedFile ? "active" : "")" 
+             style="padding-left: @(level * 15 + 16)px"
+             @onclick="() => SelectFile(item)">
+            @if (item.IsDirectory)
+            {
+                <span style="font-size: 0.7rem; width: 12px; display: inline-block;">@(isExpanded ? "▼" : "▶")</span>
+                <span>📂 @item.Name</span>
+            }
+            else
+            {
+                <span style="width: 12px; display: inline-block;"></span>
+                <span>📄 @item.Name</span>
+            }
+        </div>
+        @if (item.IsDirectory && isExpanded)
+        {
+            @foreach (var child in item.Children)
+            {
+                @RenderTreeItem(child, level + 1)
+            }
+        }
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection is not null) await _hubConnection.DisposeAsync();
+    }
+}
