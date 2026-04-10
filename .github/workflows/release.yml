@@ -1,0 +1,45 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 1. Windows용 빌드 및 압축
+      - name: Build Windows
+        run: |
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r win-x64 -o ./win-build
+          zip -j PortableObsidian_Windows.zip ./win-build/PortableObsidian.exe
+
+      # 2. Linux용 빌드 및 압축
+      - name: Build Linux
+        run: |
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r linux-x64 -o ./linux-build
+          zip -j PortableObsidian_Linux.zip ./linux-build/PortableObsidian
+
+      # 3. GitHub Release 생성 및 파일 업로드
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PortableObsidian_Windows.zip
+            PortableObsidian_Linux.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
