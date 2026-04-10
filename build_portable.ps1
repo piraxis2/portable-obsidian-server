@@ -20,5 +20,6 @@ dotnet publish PortableObsidian/PortableObsidian.csproj `
     -r linux-x64 `
     -o "$outputDir/Linux"
 
+
 Write-Host "`n--- 빌드 완료! ---" -ForegroundColor Green
 Write-Host "결과물 위치: $PSScriptRoot\$outputDir"
