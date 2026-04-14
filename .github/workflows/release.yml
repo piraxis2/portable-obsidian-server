@@ -23,17 +23,17 @@ jobs:
       # 1. Windows용 빌드 및 폴더 전체 압축
       - name: Build Windows
         run: |
-          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r win-x64 -o ./win-publish -p:PublishSingleFile=true -p:SelfContained=true
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r win-x64 -o ./win-publish --self-contained true
           cd win-publish
-          zip -r ../PortableObsidian_Windows.zip . *
+          zip -r ../PortableObsidian_Windows.zip .
           cd ..
 
       # 2. Linux용 빌드 및 폴더 전체 압축
       - name: Build Linux
         run: |
-          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r linux-x64 -o ./linux-publish -p:PublishSingleFile=true -p:SelfContained=true
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r linux-x64 -o ./linux-publish --self-contained true
           cd linux-publish
-          zip -r ../PortableObsidian_Linux.zip . *
+          zip -r ../PortableObsidian_Linux.zip .
           cd ..
 
       # 3. GitHub Release 생성 및 파일 업로드
