@@ -71,14 +71,32 @@ public class VaultHub : Hub
     public static void SetReadOnly(bool readOnly) => _isReadOnly = readOnly;
     public bool GetIsReadOnly() => _isReadOnly;
 
+    // 접속 로그
+    public override async Task OnConnectedAsync()
+    {
+        var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+        Console.WriteLine($"[Access] Connected: {ip} (ID: {Context.ConnectionId})");
+        await base.OnConnectedAsync();
+    }
+
+    // 종료 로그
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+        Console.WriteLine($"[Access] Disconnected: {ip} (ID: {Context.ConnectionId})");
+        await base.OnDisconnectedAsync(exception);
+    }
+
     public Task<VaultItem> GetVaultTree()
     {
-        var root = new DirectoryInfo(VaultRoot);
-        return Task.FromResult(BuildTree(root, ""));
+        return Task.FromResult(BuildTree(new DirectoryInfo(VaultRoot), ""));
     }
 
     public async Task<string> ReadFile(string relativePath)
     {
+        var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+        Console.WriteLine($"[View] {ip} is reading: {relativePath}");
+
         var fullPath = Path.Combine(VaultRoot, relativePath);
         if (!File.Exists(fullPath)) return "파일을 찾을 수 없습니다.";
         return await File.ReadAllTextAsync(fullPath);
