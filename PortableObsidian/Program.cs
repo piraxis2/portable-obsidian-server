@@ -3,8 +3,13 @@ using PortableObsidian.Components;
 using PortableObsidian.Hubs;
 using PortableObsidian.Services;
 using PortableObsidian.Config;
+using Microsoft.Extensions.FileProviders;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = AppDomain.CurrentDomain.BaseDirectory // 실행 파일 경로를 루트로 강제 설정
+});
 
 // 1. 설정 및 서비스 등록
 var config = AppConfig.Load();
@@ -32,13 +37,19 @@ builder.Services.AddCors(options => {
 
 var app = builder.Build();
 
-app.UseStaticFiles();
+// 3. 정적 파일 설정 보강
+app.UseStaticFiles(); // 기본 wwwroot (실행 파일 옆의 폴더)
+
 // 옵시디언 볼트 내의 파일들을 /vault 경로로 서빙
-app.UseStaticFiles(new StaticFileOptions
+if (Directory.Exists(pathService.CurrentPath))
 {
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(pathService.CurrentPath),
-    RequestPath = "/vault"
-});
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(pathService.CurrentPath),
+        RequestPath = "/vault"
+    });
+}
+
 app.UseAntiforgery();
 app.UseCors();
 
@@ -49,10 +60,17 @@ app.MapRazorComponents<App>()
 app.MapHub<VaultHub>("/vaulthub");
 
 // VaultHub의 정적 컨텍스트 초기화 (파일 감시용)
-using (var scope = app.Services.CreateScope())
+try 
 {
-    var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VaultHub>>();
-    VaultHub.InitializeStaticContext(hubContext, pathService.CurrentPath);
+    using (var scope = app.Services.CreateScope())
+    {
+        var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VaultHub>>();
+        VaultHub.InitializeStaticContext(hubContext, pathService.CurrentPath);
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"[Warn] Failed to initialize file watcher: {ex.Message}");
 }
 
 Console.WriteLine($"\n[Server] Obsidian Bridge is running...");
@@ -66,7 +84,6 @@ _ = Task.Run(async () => {
     await tunnel.StartAsync(localPort, config.TunnelToken);
 });
 
-// 프로그램 종료 시 터널 프로세스도 정리
 AppDomain.CurrentDomain.ProcessExit += (s, e) => TunnelService.Stop();
 
 // 콘솔 명령어 입력 루프
@@ -91,15 +108,11 @@ _ = Task.Run(async () => {
                 pathService.SetPath(arg);
                 config.VaultPath = pathService.CurrentPath;
                 AppConfig.Save(config);
-
                 VaultHub.UpdateWatcherPath(pathService.CurrentPath);
                 await hubContext.Clients.All.SendAsync("VaultPathChanged");
                 Console.WriteLine($"[System] Vault path changed: {pathService.CurrentPath}");
             }
-            else
-            {
-                Console.WriteLine($"[Error] Path '{arg}' not found.");
-            }
+            else Console.WriteLine($"[Error] Path '{arg}' not found.");
         }
         else if (cmd == "ro")
         {
