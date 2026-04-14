@@ -48,6 +48,13 @@ app.MapRazorComponents<App>()
 
 app.MapHub<VaultHub>("/vaulthub");
 
+// VaultHub의 정적 컨텍스트 초기화 (파일 감시용)
+using (var scope = app.Services.CreateScope())
+{
+    var hubContext = scope.ServiceProvider.GetRequiredService<IHubContext<VaultHub>>();
+    VaultHub.InitializeStaticContext(hubContext, pathService.CurrentPath);
+}
+
 Console.WriteLine($"\n[Server] Obsidian Bridge is running...");
 Console.WriteLine($"[Server] Port: {localPort}");
 Console.WriteLine($"[Server] Vault: {pathService.CurrentPath}");

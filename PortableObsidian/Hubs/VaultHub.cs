@@ -11,67 +11,56 @@ public class VaultHub : Hub
     private static FileSystemWatcher? _watcher;
     private static IHubContext<VaultHub>? _staticContext;
 
-    public VaultHub(VaultPathService pathService, IConfiguration config, IHubContext<VaultHub> hubContext)
+    public VaultHub(VaultPathService pathService, IConfiguration config)
     {
         _pathService = pathService;
-        _staticContext = hubContext;
 
         if (config.GetValue<bool>("IS_READ_ONLY_INIT")) {
             _isReadOnly = true;
         }
-
-        // 워처 초기화 (한 번만 실행)
-        InitializeWatcher();
     }
 
-    private void InitializeWatcher()
+    // Program.cs에서 서버 시작 시 컨텍스트를 설정해줌
+    public static void InitializeStaticContext(IHubContext<VaultHub> hubContext, string path)
     {
-        if (_watcher != null) return;
-
-        _watcher = new FileSystemWatcher(_pathService.CurrentPath, "*.md")
+        _staticContext = hubContext;
+        if (_watcher == null)
         {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
-            EnableRaisingEvents = true
-        };
+            _watcher = new FileSystemWatcher(path, "*.md")
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
+                EnableRaisingEvents = true
+            };
 
-        _watcher.Changed += OnFileChanged;
-        _watcher.Created += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
-        _watcher.Deleted += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
-        _watcher.Renamed += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
-    }
-
-    // 볼트 경로가 바뀌었을 때 워처 경로 갱신용 (정적 메서드)
-    public static void UpdateWatcherPath(string newPath)
-    {
-        if (_watcher != null)
-        {
-            _watcher.Path = newPath;
+            _watcher.Changed += OnFileChanged;
+            _watcher.Created += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
+            _watcher.Deleted += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
+            _watcher.Renamed += (s, e) => _staticContext?.Clients.All.SendAsync("VaultChanged");
         }
     }
 
-    private async void OnFileChanged(object sender, FileSystemEventArgs e)
+    public static void UpdateWatcherPath(string newPath)
+    {
+        if (_watcher != null) _watcher.Path = newPath;
+    }
+
+    private static async void OnFileChanged(object sender, FileSystemEventArgs e)
     {
         try
         {
-            // 파일이 사용 중일 수 있으므로 잠시 대기 후 읽기 (옵시디언 저장 완료 대기)
             await Task.Delay(500);
-            
-            var relativePath = Path.GetRelativePath(_pathService.CurrentPath, e.FullPath);
             var content = await File.ReadAllTextAsync(e.FullPath);
-            
-            // 변경된 내용을 모든 클라이언트에 브로드캐스트
-            await _staticContext!.Clients.All.SendAsync("FileUpdated", relativePath, content);
+            // static 필드에서 직접 경로를 가져오기 어려우므로 클라이언트가 경로 체크를 하도록 함
+            await _staticContext!.Clients.All.SendAsync("FileUpdated", e.Name?.Replace("\\", "/"), content);
         }
-        catch { /* 파일 접근 중인 경우 무시 */ }
+        catch { }
     }
 
     private string VaultRoot => _pathService.CurrentPath;
-
     public static void SetReadOnly(bool readOnly) => _isReadOnly = readOnly;
     public bool GetIsReadOnly() => _isReadOnly;
 
-    // 접속 로그
     public override async Task OnConnectedAsync()
     {
         var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
@@ -79,7 +68,6 @@ public class VaultHub : Hub
         await base.OnConnectedAsync();
     }
 
-    // 종료 로그
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
@@ -96,167 +84,100 @@ public class VaultHub : Hub
     {
         var ip = Context.GetHttpContext()?.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
         Console.WriteLine($"[View] {ip} is reading: {relativePath}");
-
         var fullPath = Path.Combine(VaultRoot, relativePath);
-        if (!File.Exists(fullPath)) return "파일을 찾을 수 없습니다.";
+        if (!File.Exists(fullPath)) return "File not found.";
         return await File.ReadAllTextAsync(fullPath);
     }
 
     public async Task SaveFile(string relativePath, string content)
     {
-        if (_isReadOnly) throw new HubException("현재 읽기 전용 모드입니다.");
-
+        if (_isReadOnly) throw new HubException("ReadOnly mode.");
         var fullPath = Path.Combine(VaultRoot, relativePath);
-        
-        if (!Path.GetFullPath(fullPath).StartsWith(Path.GetFullPath(VaultRoot)))
-            throw new HubException("접근 권한이 없는 경로입니다.");
-
-        // 워처 이벤트를 잠시 끄고 저장 (내가 저장한 건 내가 다시 받지 않도록)
+        if (!Path.GetFullPath(fullPath).StartsWith(Path.GetFullPath(VaultRoot))) throw new HubException("Access denied.");
         if (_watcher != null) _watcher.EnableRaisingEvents = false;
-        
         await File.WriteAllTextAsync(fullPath, content);
-        
         if (_watcher != null) _watcher.EnableRaisingEvents = true;
-
         await Clients.Others.SendAsync("FileUpdated", relativePath, content);
     }
 
     public async Task CreateFile(string relativePath)
     {
-        if (_isReadOnly) throw new HubException("현재 읽기 전용 모드입니다.");
+        if (_isReadOnly) throw new HubException("ReadOnly mode.");
         var fullPath = Path.Combine(VaultRoot, relativePath);
         if (!fullPath.EndsWith(".md")) fullPath += ".md";
-        if (File.Exists(fullPath)) throw new HubException("이미 존재하는 파일명입니다.");
         await File.WriteAllTextAsync(fullPath, "");
         await Clients.All.SendAsync("VaultChanged");
     }
 
     public async Task CreateDirectory(string relativePath)
     {
-        if (_isReadOnly) throw new HubException("현재 읽기 전용 모드입니다.");
-        var fullPath = Path.Combine(VaultRoot, relativePath);
-        if (Directory.Exists(fullPath)) throw new HubException("이미 존재하는 폴더명입니다.");
-        Directory.CreateDirectory(fullPath);
+        if (_isReadOnly) throw new HubException("ReadOnly mode.");
+        Directory.CreateDirectory(Path.Combine(VaultRoot, relativePath));
         await Clients.All.SendAsync("VaultChanged");
     }
 
     public async Task RenameFile(string oldRelativePath, string newName)
     {
-        if (_isReadOnly) throw new HubException("현재 읽기 전용 모드입니다.");
+        if (_isReadOnly) throw new HubException("ReadOnly mode.");
         var oldFullPath = Path.Combine(VaultRoot, oldRelativePath);
-        if (!File.Exists(oldFullPath)) throw new HubException("변경할 파일을 찾을 수 없습니다.");
         if (!newName.ToLower().EndsWith(".md")) newName += ".md";
-        var directory = Path.GetDirectoryName(oldFullPath) ?? VaultRoot;
-        var newFullPath = Path.Combine(directory, newName);
-        if (File.Exists(newFullPath)) throw new HubException("동일한 이름의 파일이 이미 존재합니다.");
+        var newFullPath = Path.Combine(Path.GetDirectoryName(oldFullPath)!, newName);
         File.Move(oldFullPath, newFullPath);
-        var newRelativePath = Path.GetRelativePath(VaultRoot, newFullPath);
+        var newRelativePath = Path.GetRelativePath(VaultRoot, newFullPath).Replace("\\", "/");
         await Clients.All.SendAsync("VaultChanged");
         await Clients.All.SendAsync("FileRenamed", oldRelativePath, newRelativePath, newName);
     }
 
-    // 파일 이동
     public async Task MoveFile(string fileRelativePath, string targetDirectoryRelativePath)
     {
-        if (_isReadOnly) throw new HubException("현재 읽기 전용 모드입니다.");
-
+        if (_isReadOnly) throw new HubException("ReadOnly mode.");
         var oldFullPath = Path.Combine(VaultRoot, fileRelativePath);
-        var targetDirFullPath = Path.Combine(VaultRoot, targetDirectoryRelativePath);
-        
-        if (!File.Exists(oldFullPath)) throw new HubException("이동할 파일을 찾을 수 없습니다.");
-        if (!Directory.Exists(targetDirFullPath)) throw new HubException("대상 폴더를 찾을 수 없습니다.");
-
-        var fileName = Path.GetFileName(oldFullPath);
-        var newFullPath = Path.Combine(targetDirFullPath, fileName);
-
-        if (File.Exists(newFullPath)) throw new HubException("대상 폴더에 동일한 이름의 파일이 이미 존재합니다.");
-
+        var newFullPath = Path.Combine(VaultRoot, targetDirectoryRelativePath, Path.GetFileName(oldFullPath));
         File.Move(oldFullPath, newFullPath);
-        
         await Clients.All.SendAsync("VaultChanged");
     }
 
-    // 파일 및 내용 검색
     public async Task<List<VaultItem>> SearchVault(string query)
     {
         var results = new List<VaultItem>();
-        if (string.IsNullOrWhiteSpace(query)) return results;
-
         var root = new DirectoryInfo(VaultRoot);
-        var files = root.GetFiles("*.md", SearchOption.AllDirectories);
-
-        foreach (var file in files)
+        foreach (var file in root.GetFiles("*.md", SearchOption.AllDirectories))
         {
-            var relativePath = Path.GetRelativePath(VaultRoot, file.FullName);
-            
-            // 1. 파일 이름 검색
-            if (file.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
-            {
-                results.Add(new VaultItem { Name = file.Name, RelativePath = relativePath, IsDirectory = false });
-                continue;
-            }
-
-            // 2. 파일 내용 검색
-            try
-            {
-                var content = await File.ReadAllTextAsync(file.FullName);
-                if (content.Contains(query, StringComparison.OrdinalIgnoreCase))
-                {
-                    results.Add(new VaultItem { Name = file.Name, RelativePath = relativePath, IsDirectory = false });
-                }
-            }
-            catch { /* 읽기 오류 무시 */ }
+            var rel = Path.GetRelativePath(VaultRoot, file.FullName);
+            if (file.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || (await File.ReadAllTextAsync(file.FullName)).Contains(query, StringComparison.OrdinalIgnoreCase))
+                results.Add(new VaultItem { Name = file.Name, RelativePath = rel.Replace("\\", "/"), IsDirectory = false });
         }
-
         return results;
     }
 
-    // 파일명만으로 실제 경로 찾기 (이미지 등)
-    public string ResolveFilePath(string fileName)
+    public async Task<string> GetImageBase64(string fileName)
     {
         var root = new DirectoryInfo(VaultRoot);
-        var file = root.GetFiles("*", SearchOption.AllDirectories)
-                       .FirstOrDefault(f => f.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
-        
+        var file = root.GetFiles("*", SearchOption.AllDirectories).FirstOrDefault(f => f.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
         if (file != null)
         {
-            var relativePath = Path.GetRelativePath(VaultRoot, file.FullName);
-            return relativePath.Replace("\\", "/");
+            var bytes = await File.ReadAllBytesAsync(file.FullName);
+            var ext = Path.GetExtension(file.Name).ToLower().TrimStart('.');
+            return $"data:image/{(ext == "jpg" ? "jpeg" : ext)};base64,{Convert.ToBase64String(bytes)}";
         }
         return string.Empty;
     }
 
-    // 이미지 파일을 Base64로 변환하여 직접 전송
-    public async Task<string> GetImageBase64(string fileName)
+    public string ResolveFilePath(string fileName)
     {
         var root = new DirectoryInfo(VaultRoot);
-        var file = root.GetFiles("*", SearchOption.AllDirectories)
-                       .FirstOrDefault(f => f.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
-
-        if (file != null)
-        {
-            var bytes = await File.ReadAllBytesAsync(file.FullName);
-            var extension = Path.GetExtension(file.Name).ToLower().TrimStart('.');
-            if (extension == "jpg") extension = "jpeg";
-            
-            return $"data:image/{extension};base64,{Convert.ToBase64String(bytes)}";
-        }
-        return string.Empty;
+        var file = root.GetFiles("*", SearchOption.AllDirectories).FirstOrDefault(f => f.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        return file != null ? Path.GetRelativePath(VaultRoot, file.FullName).Replace("\\", "/") : string.Empty;
     }
 
     private VaultItem BuildTree(DirectoryInfo directory, string relativePath)
     {
         var item = new VaultItem { Name = directory.Name, RelativePath = relativePath, IsDirectory = true };
         if (!directory.Exists) return item;
-        foreach (var dir in directory.GetDirectories())
-        {
-            if (dir.Name.StartsWith(".")) continue;
-            item.Children.Add(BuildTree(dir, Path.Combine(relativePath, dir.Name)));
-        }
+        foreach (var dir in directory.GetDirectories().Where(d => !d.Name.StartsWith(".")))
+            item.Children.Add(BuildTree(dir, Path.Combine(relativePath, dir.Name).Replace("\\", "/")));
         foreach (var file in directory.GetFiles("*.md"))
-        {
-            item.Children.Add(new VaultItem { Name = file.Name, RelativePath = Path.Combine(relativePath, file.Name), IsDirectory = false });
-        }
+            item.Children.Add(new VaultItem { Name = file.Name, RelativePath = Path.Combine(relativePath, file.Name).Replace("\\", "/"), IsDirectory = false });
         return item;
     }
 }
