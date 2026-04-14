@@ -20,17 +20,21 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # 1. Windows용 빌드 및 압축
+      # 1. Windows용 빌드 및 폴더 전체 압축
       - name: Build Windows
         run: |
-          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r win-x64 -o ./win-build
-          zip -j PortableObsidian_Windows.zip ./win-build/PortableObsidian.exe
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r win-x64 -o ./win-publish -p:PublishSingleFile=true -p:SelfContained=true
+          cd win-publish
+          zip -r ../PortableObsidian_Windows.zip . *
+          cd ..
 
-      # 2. Linux용 빌드 및 압축
+      # 2. Linux용 빌드 및 폴더 전체 압축
       - name: Build Linux
         run: |
-          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r linux-x64 -o ./linux-build
-          zip -j PortableObsidian_Linux.zip ./linux-build/PortableObsidian
+          dotnet publish PortableObsidian/PortableObsidian.csproj -c Release -r linux-x64 -o ./linux-publish -p:PublishSingleFile=true -p:SelfContained=true
+          cd linux-publish
+          zip -r ../PortableObsidian_Linux.zip . *
+          cd ..
 
       # 3. GitHub Release 생성 및 파일 업로드
       - name: Create Release and Upload Assets
